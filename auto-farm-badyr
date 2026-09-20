@@ -16,7 +16,7 @@ local LOCAL = Players.LocalPlayer
 -- GOD MODE
 ----------------------------------------------------------------
 
-loadstring(game:HttpGet("https://loadstring.free.nf/raw/god-mode"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/6vms/scripts/refs/heads/main/god-mode"))()
 
 ----------------------------------------------------------------
 -- config
