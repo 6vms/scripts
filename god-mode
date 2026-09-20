@@ -1,0 +1,180 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+local CHECKPOINT_KEYWORDS = {
+	"checkpoint","spawn","respawn","flag","pad","save","respawner"
+}
+
+local function isCheckpoint(part)
+	local name = part.Name:lower()
+	for _, word in ipairs(CHECKPOINT_KEYWORDS) do
+		if name:find(word:lower()) then
+			return true
+		end
+	end
+	return false
+end
+
+local function applyGodmode(char)
+	local humanoid = char:WaitForChild("Humanoid")
+	local resetting = false
+
+	humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+		if humanoid.Health <= 0 and not resetting then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	end)
+
+	humanoid.StateChanged:Connect(function(_, new)
+		if new == Enum.HumanoidStateType.Dead and not resetting then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	end)
+
+	humanoid.BreakJointsOnDeath = true
+
+	local function patchTouch(obj)
+		if obj:IsA("BasePart") then
+			if isCheckpoint(obj) then
+				obj.CanTouch = true
+			else
+				for _, child in ipairs(obj:GetChildren()) do
+					if child:IsA("TouchTransmitter") then
+						obj.CanTouch = false
+					end
+				end
+			end
+		end
+	end
+
+	for _, v in ipairs(workspace:GetDescendants()) do
+		patchTouch(v)
+	end
+
+	workspace.DescendantAdded:Connect(patchTouch)
+
+	player:GetPropertyChangedSignal("RespawnLocation"):Connect(function()
+		resetting = true
+		task.wait(1)
+		resetting = false
+	end)
+end
+
+player.CharacterAdded:Connect(applyGodmode)
+if player.Character then applyGodmode(player.Character) end
+
+local savedSpawn = nil
+local scanDelay = 0.05
+
+local function nameMatches(name)
+	if not name then return false end
+	local ln = name:lower()
+	for _,k in ipairs(CHECKPOINT_KEYWORDS) do
+		if ln:find(k) then return true end
+	end
+	return false
+end
+
+local function makeCFrameAbove(part)
+	local up = part.Position + Vector3.new(0, (part.Size.Y/2) + 2, 0)
+	return CFrame.new(up, up + part.CFrame.LookVector)
+end
+
+local function registerCheckpointPart(part)
+	if not part or not part:IsA("BasePart") then return end
+	if part:GetAttribute("ClientCheckpointRegistered") then return end
+	part:SetAttribute("ClientCheckpointRegistered", true)
+	pcall(function() part.CanTouch = true end)
+
+	local function setSpawn()
+		savedSpawn = {CFrame = makeCFrameAbove(part), Time = tick()}
+	end
+
+	local p = part:FindFirstChildWhichIsA("ProximityPrompt")
+	if p then
+		p.Enabled = true
+		p.Triggered:Connect(setSpawn)
+	end
+
+	local c = part:FindFirstChildWhichIsA("ClickDetector")
+	if c then
+		c.MouseClick:Connect(setSpawn)
+	end
+
+	part.Touched:Connect(function(hit)
+		local char = player.Character
+		if not char then return end
+		if hit and hit:IsDescendantOf(char) then
+			setSpawn()
+		end
+	end)
+end
+
+task.delay(0.3, function()
+	for _,obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			if nameMatches(obj.Name)
+				or (obj.Parent and nameMatches(obj.Parent.Name))
+				or obj:IsA("SpawnLocation")
+				or obj:FindFirstChildWhichIsA("ProximityPrompt")
+				or obj:FindFirstChildWhichIsA("ClickDetector")
+			then
+				registerCheckpointPart(obj)
+			end
+		end
+	end
+
+	workspace.DescendantAdded:Connect(function(obj)
+		if obj:IsA("BasePart") then
+			task.wait(scanDelay)
+			if nameMatches(obj.Name)
+				or (obj.Parent and nameMatches(obj.Parent.Name))
+				or obj:IsA("SpawnLocation")
+				or obj:FindFirstChildWhichIsA("ProximityPrompt")
+				or obj:FindFirstChildWhichIsA("ClickDetector")
+			then
+				registerCheckpointPart(obj)
+			end
+		end
+	end)
+end)
+
+player.CharacterAdded:Connect(function(char)
+	task.wait(0.2)
+	if savedSpawn and savedSpawn.CFrame and char.PrimaryPart then
+		char:SetPrimaryPartCFrame(savedSpawn.CFrame)
+		return
+	end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	local best,bd = nil,math.huge
+	for _,obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("BasePart") and (nameMatches(obj.Name) or (obj.Parent and nameMatches(obj.Parent.Name)) or obj:IsA("SpawnLocation")) then
+			local d = (obj.Position - hrp.Position).Magnitude
+			if d < bd then best,bd = obj,d end
+		end
+	end
+	if best then
+		char:SetPrimaryPartCFrame(makeCFrameAbove(best))
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local ray = Ray.new(hrp.Position, Vector3.new(0,-4,0))
+	local hit = workspace:FindPartOnRayWithIgnoreList(ray, {char})
+
+	if hit and
+		(nameMatches(hit.Name)
+		or (hit.Parent and nameMatches(hit.Parent.Name))
+		or hit:IsA("SpawnLocation"))
+	then
+		savedSpawn = {CFrame = makeCFrameAbove(hit), Time = tick()}
+	end
+end)
